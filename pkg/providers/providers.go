@@ -34,7 +34,18 @@ type FetchOpts struct {
 	PackagePath    string
 	SkipPatchCheck bool
 	Version        string
-	NamePattern string
+	NamePattern    string
+	// CooldownPeriodDays, when > 0, instructs the provider to skip any
+	// release whose publish timestamp is more recent than N days ago.
+	// Only applied when no explicit Version/tag was supplied.
+	CooldownPeriodDays int
+}
+
+// LatestVersionOpts carries options for GetLatestVersion calls.
+type LatestVersionOpts struct {
+	// CooldownPeriodDays, when > 0, instructs the provider to skip any
+	// release whose publish timestamp is more recent than N days ago.
+	CooldownPeriodDays int
 }
 
 type Provider interface {
@@ -43,7 +54,7 @@ type Provider interface {
 	Fetch(*FetchOpts) (*File, error)
 	// GetLatestVersion returns the version and the URL of the
 	// latest version for this binary
-	GetLatestVersion() (string, string, error)
+	GetLatestVersion(*LatestVersionOpts) (string, string, error)
 
 	// GetID returns the unique identiifer of this provider
 	GetID() string

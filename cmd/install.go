@@ -61,7 +61,8 @@ func newInstallCmd() *installCmd {
 			}
 			log.Debugf("Using provider '%s' for '%s'", p.GetID(), u)
 
-			pResult, err := p.Fetch(&providers.FetchOpts{All: root.opts.all, NamePattern: root.opts.name})
+			cooldownDays, _ := config.Get().CooldownDays()
+			pResult, err := p.Fetch(&providers.FetchOpts{All: root.opts.all, NamePattern: root.opts.name, CooldownPeriodDays: cooldownDays})
 			if err != nil {
 				return err
 			}

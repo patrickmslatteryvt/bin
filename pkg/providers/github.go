@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/caarlos0/log"
 	"github.com/google/go-github/v31/github"
@@ -41,7 +42,10 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 		release, _, err = g.client.Repositories.GetReleaseByTag(context.TODO(), g.owner, g.repo, g.tag)
 	} else if g.filter != "" {
 		log.Infof("Getting latest release matching %q for %s/%s", g.filter, g.owner, g.repo)
-		release, err = g.findLatestMatchingRelease()
+		release, err = g.findLatestMatchingRelease(opts.CooldownPeriodDays)
+	} else if opts.CooldownPeriodDays > 0 {
+		log.Infof("Getting latest release (cooldown %d days) for %s/%s", opts.CooldownPeriodDays, g.owner, g.repo)
+		release, err = g.findLatestCooldownRelease(opts.CooldownPeriodDays)
 	} else {
 		log.Infof("Getting latest release for %s/%s", g.owner, g.repo)
 		release, resp, err = g.client.Repositories.GetLatestRelease(context.TODO(), g.owner, g.repo)
@@ -87,10 +91,24 @@ func (g *gitHub) Fetch(opts *FetchOpts) (*File, error) {
 
 // GetLatestVersion checks the latest repo release and
 // returns the corresponding name and url to fetch the version
-func (g *gitHub) GetLatestVersion() (string, string, error) {
+func (g *gitHub) GetLatestVersion(opts *LatestVersionOpts) (string, string, error) {
+	cooldown := 0
+	if opts != nil {
+		cooldown = opts.CooldownPeriodDays
+	}
+
 	if g.filter != "" {
 		log.Debugf("Getting latest release matching %q for %s/%s", g.filter, g.owner, g.repo)
-		release, err := g.findLatestMatchingRelease()
+		release, err := g.findLatestMatchingRelease(cooldown)
+		if err != nil {
+			return "", "", err
+		}
+		return release.GetTagName(), release.GetHTMLURL(), nil
+	}
+
+	if cooldown > 0 {
+		log.Debugf("Getting latest release (cooldown %d days) for %s/%s", cooldown, g.owner, g.repo)
+		release, err := g.findLatestCooldownRelease(cooldown)
 		if err != nil {
 			return "", "", err
 		}
@@ -107,8 +125,14 @@ func (g *gitHub) GetLatestVersion() (string, string, error) {
 }
 
 // findLatestMatchingRelease pages through releases and returns the first one
-// whose tag (as it appears in html_url) matches the glob filter pattern.
-func (g *gitHub) findLatestMatchingRelease() (*github.RepositoryRelease, error) {
+// whose tag (as it appears in html_url) matches the glob filter pattern. When
+// cooldownDays > 0 the release must also have been published at or before the
+// cooldown cutoff.
+func (g *gitHub) findLatestMatchingRelease(cooldownDays int) (*github.RepositoryRelease, error) {
+	var cutoff time.Time
+	if cooldownDays > 0 {
+		cutoff = cooldownCutoff(cooldownDays)
+	}
 	opts := &github.ListOptions{PerPage: 30}
 	for {
 		releases, resp, err := g.client.Repositories.ListReleases(context.TODO(), g.owner, g.repo, opts)
@@ -121,16 +145,55 @@ func (g *gitHub) findLatestMatchingRelease() (*github.RepositoryRelease, error) 
 			if err != nil {
 				return nil, err
 			}
-			if matched {
-				return r, nil
+			if !matched {
+				continue
 			}
+			if cooldownDays > 0 && r.GetPublishedAt().Time.After(cutoff) {
+				log.Debugf("Skipping %s/%s %s: published %s is within %d day cooldown",
+					g.owner, g.repo, r.GetTagName(), r.GetPublishedAt().Time.Format(time.RFC3339), cooldownDays)
+				continue
+			}
+			return r, nil
 		}
 		if resp.NextPage == 0 {
 			break
 		}
 		opts.Page = resp.NextPage
 	}
+	if cooldownDays > 0 {
+		return nil, fmt.Errorf("no release matching %q older than %d day cooldown found for %s/%s", g.filter, cooldownDays, g.owner, g.repo)
+	}
 	return nil, fmt.Errorf("no release matching %q found for %s/%s", g.filter, g.owner, g.repo)
+}
+
+// findLatestCooldownRelease pages through releases and returns the most recent
+// non-draft, non-prerelease release whose publish time is at or before the
+// cooldown cutoff.
+func (g *gitHub) findLatestCooldownRelease(cooldownDays int) (*github.RepositoryRelease, error) {
+	cutoff := cooldownCutoff(cooldownDays)
+	opts := &github.ListOptions{PerPage: 30}
+	for {
+		releases, resp, err := g.client.Repositories.ListReleases(context.TODO(), g.owner, g.repo, opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range releases {
+			if r.GetDraft() || r.GetPrerelease() {
+				continue
+			}
+			if r.GetPublishedAt().Time.After(cutoff) {
+				log.Debugf("Skipping %s/%s %s: published %s is within %d day cooldown",
+					g.owner, g.repo, r.GetTagName(), r.GetPublishedAt().Time.Format(time.RFC3339), cooldownDays)
+				continue
+			}
+			return r, nil
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return nil, fmt.Errorf("no release older than %d day cooldown found for %s/%s", cooldownDays, g.owner, g.repo)
 }
 
 func (g *gitHub) GetID() string {

@@ -84,8 +84,11 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 		log.Infof("Getting %s release for %s", g.tag, g.repo)
 		release, err = g.getRelease(g.repo, g.tag)
 	} else {
+		if opts.CooldownPeriodDays > 0 {
+			log.Warnf("cooldown_period_days not supported for provider %s, ignoring", g.GetID())
+		}
 		var version string
-		version, _, err = g.GetLatestVersion()
+		version, _, err = g.GetLatestVersion(nil)
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +127,10 @@ func (g *hashiCorp) Fetch(opts *FetchOpts) (*File, error) {
 
 // GetLatestVersion checks the latest repo release and
 // returns the corresponding name and url to fetch the version
-func (g *hashiCorp) GetLatestVersion() (string, string, error) {
+func (g *hashiCorp) GetLatestVersion(opts *LatestVersionOpts) (string, string, error) {
+	if opts != nil && opts.CooldownPeriodDays > 0 {
+		log.Warnf("cooldown_period_days not supported for provider %s, ignoring", g.GetID())
+	}
 	log.Debugf("Getting latest release for %s", g.repo)
 
 	releases, err := g.listReleases(g.repo)

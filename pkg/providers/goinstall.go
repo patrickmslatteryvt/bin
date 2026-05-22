@@ -63,8 +63,11 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 		}
 		log.Infof("Getting %s release for %s", g.tag, g.repo)
 	} else {
+		if opts.CooldownPeriodDays > 0 {
+			log.Warnf("cooldown_period_days not supported for provider %s, ignoring", g.GetID())
+		}
 		log.Infof("Getting latest release for %s", g.repo)
-		if name, _, err := g.GetLatestVersion(); err != nil {
+		if name, _, err := g.GetLatestVersion(nil); err != nil {
 			return nil, fmt.Errorf("failed to get latest version: %w", err)
 		} else {
 			g.tag = name
@@ -96,7 +99,10 @@ func (g *goinstall) Fetch(opts *FetchOpts) (*File, error) {
 	}, nil
 }
 
-func (g *goinstall) GetLatestVersion() (string, string, error) {
+func (g *goinstall) GetLatestVersion(opts *LatestVersionOpts) (string, string, error) {
+	if opts != nil && opts.CooldownPeriodDays > 0 {
+		log.Warnf("cooldown_period_days not supported for provider %s, ignoring", g.GetID())
+	}
 	resp, err := httpclient.Client.Get(g.latestURL)
 	if err != nil {
 		return "", "", err

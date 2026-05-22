@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"code.gitea.io/sdk/gitea"
 	"github.com/caarlos0/log"
@@ -34,6 +35,9 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 		}
 		log.Infof("Getting %s release for %s/%s", c.tag, c.owner, c.repo)
 		release, _, err = c.client.GetReleaseByTag(c.owner, c.repo, c.tag)
+	} else if opts.CooldownPeriodDays > 0 {
+		log.Infof("Getting latest release (cooldown %d days) for %s/%s", opts.CooldownPeriodDays, c.owner, c.repo)
+		release, err = c.findLatestCooldownRelease(opts.CooldownPeriodDays)
 	} else {
 		log.Infof("Getting latest release for %s/%s", c.owner, c.repo)
 		release, resp, err = c.client.GetLatestRelease(c.owner, c.repo)
@@ -79,7 +83,21 @@ func (c *codeberg) Fetch(opts *FetchOpts) (*File, error) {
 
 // GetLatestVersion checks the latest repo release and
 // returns the corresponding name and url to fetch the version
-func (c *codeberg) GetLatestVersion() (string, string, error) {
+func (c *codeberg) GetLatestVersion(opts *LatestVersionOpts) (string, string, error) {
+	cooldown := 0
+	if opts != nil {
+		cooldown = opts.CooldownPeriodDays
+	}
+
+	if cooldown > 0 {
+		log.Debugf("Getting latest release (cooldown %d days) for %s/%s", cooldown, c.owner, c.repo)
+		release, err := c.findLatestCooldownRelease(cooldown)
+		if err != nil {
+			return "", "", err
+		}
+		return release.TagName, release.HTMLURL, nil
+	}
+
 	log.Debugf("Getting latest release for %s/%s", c.owner, c.repo)
 	release, _, err := c.client.GetLatestRelease(c.owner, c.repo)
 	if err != nil {
@@ -87,6 +105,45 @@ func (c *codeberg) GetLatestVersion() (string, string, error) {
 	}
 
 	return release.TagName, release.HTMLURL, nil
+}
+
+// findLatestCooldownRelease pages through releases newest-first and returns
+// the first non-draft, non-prerelease release whose publish time is at or
+// before the cooldown cutoff.
+func (c *codeberg) findLatestCooldownRelease(cooldownDays int) (*gitea.Release, error) {
+	cutoff := cooldownCutoff(cooldownDays)
+	page := 1
+	for {
+		releases, resp, err := c.client.ListReleases(c.owner, c.repo, gitea.ListReleasesOptions{
+			ListOptions: gitea.ListOptions{Page: page, PageSize: 50},
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(releases) == 0 {
+			break
+		}
+		for _, r := range releases {
+			if r.IsDraft || r.IsPrerelease {
+				continue
+			}
+			ts := r.PublishedAt
+			if ts.IsZero() {
+				ts = r.CreatedAt
+			}
+			if ts.After(cutoff) {
+				log.Debugf("Skipping %s/%s %s: published %s is within %d day cooldown",
+					c.owner, c.repo, r.TagName, ts.Format(time.RFC3339), cooldownDays)
+				continue
+			}
+			return r, nil
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		page = resp.NextPage
+	}
+	return nil, fmt.Errorf("no release older than %d day cooldown found for %s/%s", cooldownDays, c.owner, c.repo)
 }
 
 func (c *codeberg) GetID() string {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/caarlos0/log"
 	"github.com/coreos/go-semver/semver"
@@ -44,7 +45,7 @@ func (g *gitLab) Fetch(opts *FetchOpts) (*File, error) {
 		// TODO: handle case when repo doesn't have releases?
 		log.Infof("Getting latest release for %s/%s", g.owner, g.repo)
 		var name string
-		name, _, err = g.GetLatestVersion()
+		name, _, err = g.GetLatestVersion(&LatestVersionOpts{CooldownPeriodDays: opts.CooldownPeriodDays})
 		if err != nil {
 			return nil, err
 		}
@@ -189,7 +190,11 @@ func (g *gitLab) GetID() string {
 
 // GetLatestVersion checks the latest repo release and
 // returns the corresponding name and url to fetch the version
-func (g *gitLab) GetLatestVersion() (string, string, error) {
+func (g *gitLab) GetLatestVersion(opts *LatestVersionOpts) (string, string, error) {
+	cooldown := 0
+	if opts != nil {
+		cooldown = opts.CooldownPeriodDays
+	}
 	log.Debugf("Getting latest release for %s/%s", g.owner, g.repo)
 	projectPath := fmt.Sprintf("%s/%s", g.owner, g.repo)
 
@@ -202,11 +207,22 @@ func (g *gitLab) GetLatestVersion() (string, string, error) {
 	if len(releases) == 0 {
 		return "", "", fmt.Errorf("no releases found for %s/%s", g.owner, g.repo)
 	}
+
+	var cutoff time.Time
+	if cooldown > 0 {
+		cutoff = cooldownCutoff(cooldown)
+	}
+
 	highestTagName := releases[0].TagName
 	var svs semver.Versions
 	svToTagName := map[string]string{}
 	tagNameToRelease := map[string]*gitlab.Release{}
 	for _, release := range releases {
+		if cooldown > 0 && release.ReleasedAt != nil && release.ReleasedAt.After(cutoff) {
+			log.Debugf("Skipping %s/%s %s: released %s is within %d day cooldown",
+				g.owner, g.repo, release.TagName, release.ReleasedAt.Format(time.RFC3339), cooldown)
+			continue
+		}
 		tagName := strings.TrimPrefix(release.TagName, "v")
 		sv, err := semver.NewVersion(tagName)
 		if err != nil {
@@ -221,6 +237,8 @@ func (g *gitLab) GetLatestVersion() (string, string, error) {
 	if len(svs) > 0 {
 		sort.Sort(svs)
 		highestTagName = svToTagName[svs[len(svs)-1].String()]
+	} else if cooldown > 0 {
+		return "", "", fmt.Errorf("no release older than %d day cooldown found for %s/%s", cooldown, g.owner, g.repo)
 	}
 
 	return highestTagName, tagNameToRelease[highestTagName].Commit.WebURL, nil

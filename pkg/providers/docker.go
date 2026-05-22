@@ -22,6 +22,9 @@ func (d *docker) Fetch(opts *FetchOpts) (*File, error) {
 		// this is used by for the `ensure` command
 		d.tag = opts.Version
 	}
+	if opts.CooldownPeriodDays > 0 {
+		log.Warnf("cooldown_period_days not supported for provider %s, ignoring", d.GetID())
+	}
 	log.Infof("Pulling docker image %s:%s", d.repo, d.tag)
 	out, err := d.client.ImageCreate(context.Background(), fmt.Sprintf("%s:%s", d.repo, d.tag), image.CreateOptions{})
 	if err != nil {
@@ -47,7 +50,10 @@ func (d *docker) Fetch(opts *FetchOpts) (*File, error) {
 }
 
 // TODO: missing implementation here
-func (d *docker) GetLatestVersion() (string, string, error) {
+func (d *docker) GetLatestVersion(opts *LatestVersionOpts) (string, string, error) {
+	if opts != nil && opts.CooldownPeriodDays > 0 {
+		log.Warnf("cooldown_period_days not supported for provider %s, ignoring", d.GetID())
+	}
 	return d.tag, "", nil
 }
 

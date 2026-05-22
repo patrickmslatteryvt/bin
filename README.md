@@ -237,6 +237,29 @@ Path to the configuration directory respects the `XDG Base Directory specificati
 
 Same than linux but uses `%USERPROFILE%` without `XDG_CONFIG_HOME`.
 
+### Configuration options
+
+The configuration file is a JSON document. The following top-level options are supported:
+
+| Option                 | Type    | Default        | Description |
+| ---------------------- | ------- | -------------- | ----------- |
+| `default_path`         | string  | auto-detected  | Directory where `bin install` drops binaries when no explicit path is given.   |
+| `cooldown_period_days` | integer | unset (off)    | When set to a positive integer, `bin install` (without an explicit release tag) and `bin update` will skip any release published more recently than N days ago and pick the most recent release outside that window. |
+
+`cooldown_period_days` is useful as a supply-chain defence: malicious releases are usually caught and yanked within a few days, so a short cooldown dramatically reduces blast radius.  
+A recommended starting value for `cooldown_period_days` is `7` (matching Homebrew's recent direction for pip/npm). Explicit version installs (e.g. `bin install github.com/foo/bar/releases/tag/v1.2.3`) and `bin ensure` are not affected by the cooldown.  
+The `hashicorp`, `docker`, and `goinstall` providers do not expose release timestamps through their APIs; when a cooldown is configured `bin` logs a warning and installs/updates the latest version unchanged for those providers.
+
+Example:
+
+```json
+{
+    "default_path": "/home/user/.local/bin",
+    "cooldown_period_days": 7,
+    "bins": {}
+}
+```
+
 ### Binary Storage
 
 By default, `bin` stores binaries in:

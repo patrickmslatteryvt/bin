@@ -22,6 +22,20 @@ type config struct {
 	// if necessary
 	DefaultPath string             `json:"default_path"`
 	Bins        map[string]*Binary `json:"bins"`
+	// CooldownPeriodDays, when set to a positive integer, causes
+	// `bin install` (no explicit tag) and `bin update` to ignore any
+	// release published more recently than N days ago. Absent / null /
+	// non-positive means the cooldown is disabled.
+	CooldownPeriodDays *int `json:"cooldown_period_days,omitempty"`
+}
+
+// CooldownDays returns the configured cooldown period in days and a flag
+// indicating whether the cooldown is enabled.
+func (c *config) CooldownDays() (int, bool) {
+	if c.CooldownPeriodDays == nil || *c.CooldownPeriodDays <= 0 {
+		return 0, false
+	}
+	return *c.CooldownPeriodDays, true
 }
 
 type Binary struct {

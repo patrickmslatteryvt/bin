@@ -50,6 +50,7 @@ func newUpdateCmd() *updateCmd {
 
 			toUpdate := map[*updateInfo]*config.Binary{}
 			cfg := config.Get()
+			cooldownDays, _ := cfg.CooldownDays()
 			binsToProcess := map[string]*config.Binary{}
 
 			// Update specific binaries
@@ -78,7 +79,7 @@ func newUpdateCmd() *updateCmd {
 				}
 				log.Debugf("Using provider '%s' for '%s'", p.GetID(), b.URL)
 
-				if ui, err := getLatestVersion(b, p); err != nil {
+				if ui, err := getLatestVersion(b, p, cooldownDays); err != nil {
 					if root.opts.continueOnError {
 						updateFailures[b] = fmt.Errorf("Error while getting latest version of %v: %v", b.Path, err)
 						continue
@@ -167,9 +168,9 @@ func newUpdateCmd() *updateCmd {
 	return root
 }
 
-func getLatestVersion(b *config.Binary, p providers.Provider) (*updateInfo, error) {
+func getLatestVersion(b *config.Binary, p providers.Provider, cooldownDays int) (*updateInfo, error) {
 	log.Debugf("Checking updates for %s", b.Path)
-	v, u, err := p.GetLatestVersion()
+	v, u, err := p.GetLatestVersion(&providers.LatestVersionOpts{CooldownPeriodDays: cooldownDays})
 	if err != nil {
 		return nil, fmt.Errorf("Error checking updates for %s, %w", b.Path, err)
 	}
